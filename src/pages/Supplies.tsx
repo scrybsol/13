@@ -53,7 +53,7 @@ interface SupplyFormData {
 
 export default function Supplies() {
   const { user } = useAuth();
-  const { showToast } = useToast();
+  const { success: showSuccess, error: showError } = useToast();
   const {
     supplies,
     filteredSupplies,
@@ -91,6 +91,7 @@ export default function Supplies() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [formSuccess, setFormSuccess] = useState(false);
 
   // Initialize
   useEffect(() => {
@@ -126,29 +127,54 @@ export default function Supplies() {
       [name]: value,
     }));
     setFormError(null);
+    setFormSuccess(false);
   };
 
   const validateForm = (): boolean => {
-    if (!formData.name.trim()) {
+    // Name validation
+    if (!formData.name || !formData.name.trim()) {
       setFormError('Supply name is required');
       return false;
     }
-    if (!formData.category || formData.category === 'Select Category') {
+    if (formData.name.trim().length < 3) {
+      setFormError('Supply name must be at least 3 characters');
+      return false;
+    }
+
+    // Category validation
+    if (!formData.category || formData.category === '' || formData.category === 'Select Category') {
       setFormError('Please select a category');
       return false;
     }
-    if (!formData.unit_price || parseFloat(formData.unit_price) <= 0) {
-      setFormError('Please enter a valid price');
+
+    // Price validation
+    if (!formData.unit_price) {
+      setFormError('Please enter a price');
       return false;
     }
-    if (!formData.stock_quantity || parseInt(formData.stock_quantity) < 0) {
-      setFormError('Please enter a valid stock quantity');
+    const price = parseFloat(formData.unit_price);
+    if (isNaN(price) || price <= 0) {
+      setFormError('Please enter a valid price (must be greater than 0)');
       return false;
     }
-    if (!formData.unit_type || formData.unit_type === 'Unit Type (Piece, Box, Kg...)') {
+
+    // Quantity validation
+    if (!formData.stock_quantity) {
+      setFormError('Please enter stock quantity');
+      return false;
+    }
+    const qty = parseInt(formData.stock_quantity);
+    if (isNaN(qty) || qty < 0) {
+      setFormError('Please enter a valid stock quantity (cannot be negative)');
+      return false;
+    }
+
+    // Unit type validation
+    if (!formData.unit_type || formData.unit_type === '' || formData.unit_type === 'Unit Type (Piece, Box, Kg...)') {
       setFormError('Please select a unit type');
       return false;
     }
+
     return true;
   };
 
@@ -156,25 +182,43 @@ export default function Supplies() {
     e.preventDefault();
     setFormError(null);
 
+    // Validate user is logged in
+    if (!user?.id) {
+      setFormError('You must be logged in to list supplies');
+      showError('Please log in first');
+      return;
+    }
+
     if (!validateForm()) {
+      showError(formError || 'Please fill in all required fields');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const result = await saveSupply({
+      console.log('Submitting supply form with data:', {
         name: formData.name,
         category: formData.category,
-        description: formData.description,
+        unit_price: formData.unit_price,
+        stock_quantity: formData.stock_quantity,
+      });
+
+      const result = await saveSupply({
+        name: formData.name.trim(),
+        category: formData.category,
+        description: formData.description.trim(),
         unit_price: parseFloat(formData.unit_price),
         stock_quantity: parseInt(formData.stock_quantity),
         unit_type: formData.unit_type,
         image_url: '',
         status: 'active',
+        currency: 'UGX',
       });
 
-      if (result) {
-        showToast('Supply listed successfully!', 'success');
+      if (result?.id) {
+        setFormSuccess(true);
+        showSuccess(`✓ "${formData.name}" listed successfully!`);
+
         // Reset form
         setFormData({
           name: '',
@@ -184,13 +228,29 @@ export default function Supplies() {
           stock_quantity: '',
           unit_type: 'Piece',
         });
-        // Refresh supplies list
+
+        // Refresh supplies list - wait for it to complete
+        console.log('Refreshing supplies list...');
         await fetchSupplies({ category: 'All', search: '', sortBy: 'newest' });
+        console.log('Supplies refreshed, switching to browse tab...');
+
+        // Clear success message after 3 seconds
+        setTimeout(() => {
+          setFormSuccess(false);
+        }, 3000);
+
+        // Switch to browse tab AFTER supplies are loaded
+        setActiveTab('browse');
       } else {
-        setFormError('Failed to list supply. Please try again.');
+        const errorMsg = error || 'Failed to list supply. Please try again.';
+        setFormError(errorMsg);
+        showError(errorMsg);
       }
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'An error occurred');
+      const errorMsg = err instanceof Error ? err.message : 'An unexpected error occurred';
+      setFormError(errorMsg);
+      showError(errorMsg);
+      console.error('Supply submission error:', err);
     } finally {
       setIsSubmitting(false);
     }
@@ -454,6 +514,17 @@ export default function Supplies() {
               <div className="lg:col-span-2 bg-white rounded-lg shadow p-8">
                 <h3 className="text-lg font-semibold mb-6">Add New Supply</h3>
 
+                {/* Success Message */}
+                {formSuccess && (
+                  <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
+                    <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-medium text-green-900">Success!</h4>
+                      <p className="text-sm text-green-700">Your supply has been listed. Switching to browse view...</p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Error Message */}
                 {formError && (
                   <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
@@ -469,19 +540,21 @@ export default function Supplies() {
                   {/* Supply Name & Category */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Supply Name *</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Supply Name <span className="text-red-500">*</span></label>
                       <input
                         type="text"
                         name="name"
                         value={formData.name}
                         onChange={handleFormChange}
-                        placeholder="e.g., Steel Pipes, Cement Bags..."
+                        placeholder="e.g., Steel Pipes, Cement Bags, Construction Nails..."
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        maxLength={200}
                         required
                       />
+                      <p className="text-xs text-gray-500 mt-1">{formData.name.length}/200 characters</p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Category <span className="text-red-500">*</span></label>
                       <select
                         name="category"
                         value={formData.category}
@@ -489,7 +562,7 @@ export default function Supplies() {
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         required
                       >
-                        <option>Select Category</option>
+                        <option value="">Select Category</option>
                         {SUPPLY_CATEGORIES.slice(1).map((cat) => (
                           <option key={cat} value={cat}>{cat}</option>
                         ))}
@@ -513,34 +586,42 @@ export default function Supplies() {
                   {/* Price, Quantity, Unit Type */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Unit Price (UGX) *</label>
-                      <input
-                        type="number"
-                        name="unit_price"
-                        value={formData.unit_price}
-                        onChange={handleFormChange}
-                        placeholder="e.g., 5000"
-                        min="0"
-                        step="0.01"
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        required
-                      />
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Unit Price (UGX) <span className="text-red-500">*</span></label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-2 text-gray-500">₦</span>
+                        <input
+                          type="number"
+                          name="unit_price"
+                          value={formData.unit_price}
+                          onChange={handleFormChange}
+                          placeholder="5000"
+                          min="0"
+                          step="100"
+                          className="w-full px-4 py-2 pl-6 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          required
+                        />
+                      </div>
+                      {formData.unit_price && (
+                        <p className="text-xs text-gray-500 mt-1">Price: UGX {parseInt(formData.unit_price).toLocaleString()}</p>
+                      )}
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Stock Quantity *</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Stock Quantity <span className="text-red-500">*</span></label>
                       <input
                         type="number"
                         name="stock_quantity"
                         value={formData.stock_quantity}
                         onChange={handleFormChange}
-                        placeholder="e.g., 100"
+                        placeholder="100"
                         min="0"
+                        step="1"
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         required
                       />
+                      <p className="text-xs text-gray-500 mt-1">Available units for sale</p>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Unit Type *</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Unit Type <span className="text-red-500">*</span></label>
                       <select
                         name="unit_type"
                         value={formData.unit_type}
@@ -548,15 +629,15 @@ export default function Supplies() {
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                         required
                       >
-                        <option>Unit Type (Piece, Box, Kg...)</option>
-                        <option value="Piece">Piece</option>
-                        <option value="Box">Box</option>
+                        <option value="">Select unit type</option>
+                        <option value="Piece">Piece (Individual items)</option>
+                        <option value="Box">Box (Packed sets)</option>
                         <option value="Kg">Kilogram (Kg)</option>
-                        <option value="Liter">Liter</option>
-                        <option value="Meter">Meter</option>
-                        <option value="Bag">Bag</option>
-                        <option value="Gallon">Gallon</option>
-                        <option value="Roll">Roll</option>
+                        <option value="Liter">Liter (L)</option>
+                        <option value="Meter">Meter (M)</option>
+                        <option value="Bag">Bag (Bags)</option>
+                        <option value="Gallon">Gallon (Gal)</option>
+                        <option value="Roll">Roll (Rolls)</option>
                       </select>
                     </div>
                   </div>

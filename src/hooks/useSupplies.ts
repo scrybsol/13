@@ -124,13 +124,21 @@ export function useSupplies() {
         .eq('status', 'active')
         .order('created_at', { ascending: false });
 
-      if (filters?.category && filters.category !== 'all') {
+      if (filters?.category && filters.category.toLowerCase() !== 'all') {
         query = query.eq('category', filters.category);
       }
 
       const { data, error: err } = await query;
 
-      if (err) throw err;
+      if (err) {
+        console.error('Supabase query error:', err);
+        throw err;
+      }
+
+      console.log('Fetched supplies from database:', data?.length || 0, 'items');
+      if (data && data.length > 0) {
+        console.log('First supply:', data[0]);
+      }
 
       let processed = data || [];
 
@@ -162,10 +170,13 @@ export function useSupplies() {
         });
       }
 
+      console.log('Final processed supplies:', processed.length, 'items');
       setSupplies(processed);
       setFilteredSupplies(processed);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch supplies');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch supplies';
+      console.error('Fetch supplies error:', errorMessage);
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -436,27 +447,60 @@ export function useSupplies() {
   // Create or update supply
   const saveSupply = useCallback(async (supplyData: Partial<Supply>, supplyId?: string) => {
     if (!user?.id) {
-      setError('Must be logged in');
+      setError('Must be logged in to list supplies');
       return null;
     }
 
     try {
-      // Get contractor profile
-      const { data: contractor } = await supabase
+      // Get or create contractor profile
+      let contractor;
+
+      const { data: existingContractor, error: fetchErr } = await supabase
         .from('contractor_profiles')
         .select('id')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
-      if (!contractor) {
-        setError('Contractor profile not found');
-        return null;
+      if (fetchErr && fetchErr.code !== 'PGRST116') {
+        throw new Error(`Failed to fetch contractor profile: ${fetchErr.message}`);
+      }
+
+      if (existingContractor) {
+        contractor = existingContractor;
+      } else {
+        // Create a default contractor profile if none exists
+        const { data: newContractor, error: createErr } = await supabase
+          .from('contractor_profiles')
+          .insert([{
+            user_id: user.id,
+            company_name: `${user.email?.split('@')[0] || 'User'}'s Supplies`,
+            registration_number: 'N/A',
+            market_code: 'UGX',
+            is_verified: false,
+          }])
+          .select('id')
+          .single();
+
+        if (createErr) {
+          throw new Error(`Failed to create contractor profile: ${createErr.message}`);
+        }
+
+        if (!newContractor) {
+          throw new Error('Failed to create contractor profile - no data returned');
+        }
+
+        contractor = newContractor;
+      }
+
+      if (!contractor?.id) {
+        throw new Error('Contractor profile ID is missing');
       }
 
       const payload = {
         ...supplyData,
         user_id: user.id,
         contractor_id: contractor.id,
+        currency: supplyData.currency || 'UGX',
       };
 
       let result;
@@ -475,13 +519,27 @@ export function useSupplies() {
           .insert([payload])
           .select()
           .single();
-        if (err) throw err;
+        if (err) {
+          // More detailed error message
+          if (err.code === 'PGRST001') {
+            throw new Error('You do not have permission to create supplies. Please check your account type.');
+          }
+          throw new Error(`Database error: ${err.message}`);
+        }
         result = data;
       }
 
+      if (!result) {
+        throw new Error('Supply was not created - no data returned from database');
+      }
+
+      // Clear any previous errors on success
+      setError(null);
       return result;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save supply');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to save supply. Please try again.';
+      setError(errorMessage);
+      console.error('Supply save error:', errorMessage);
       return null;
     }
   }, [user?.id]);
