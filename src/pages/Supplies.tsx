@@ -229,19 +229,18 @@ export default function Supplies() {
           unit_type: 'Piece',
         });
 
-        // Refresh supplies list
+        // Refresh supplies list - wait for it to complete
         console.log('Refreshing supplies list...');
         await fetchSupplies({ category: 'All', search: '', sortBy: 'newest' });
+        console.log('Supplies refreshed, switching to browse tab...');
 
         // Clear success message after 3 seconds
         setTimeout(() => {
           setFormSuccess(false);
         }, 3000);
 
-        // Switch to browse tab to show the new supply
-        setTimeout(() => {
-          setActiveTab('browse');
-        }, 500);
+        // Switch to browse tab AFTER supplies are loaded
+        setActiveTab('browse');
       } else {
         const errorMsg = error || 'Failed to list supply. Please try again.';
         setFormError(errorMsg);

@@ -124,13 +124,21 @@ export function useSupplies() {
         .eq('status', 'active')
         .order('created_at', { ascending: false });
 
-      if (filters?.category && filters.category !== 'all') {
+      if (filters?.category && filters.category.toLowerCase() !== 'all') {
         query = query.eq('category', filters.category);
       }
 
       const { data, error: err } = await query;
 
-      if (err) throw err;
+      if (err) {
+        console.error('Supabase query error:', err);
+        throw err;
+      }
+
+      console.log('Fetched supplies from database:', data?.length || 0, 'items');
+      if (data && data.length > 0) {
+        console.log('First supply:', data[0]);
+      }
 
       let processed = data || [];
 
@@ -162,10 +170,13 @@ export function useSupplies() {
         });
       }
 
+      console.log('Final processed supplies:', processed.length, 'items');
       setSupplies(processed);
       setFilteredSupplies(processed);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch supplies');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch supplies';
+      console.error('Fetch supplies error:', errorMessage);
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
