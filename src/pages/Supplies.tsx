@@ -53,7 +53,7 @@ interface SupplyFormData {
 
 export default function Supplies() {
   const { user } = useAuth();
-  const { showToast } = useToast();
+  const { success: showSuccess, error: showError } = useToast();
   const {
     supplies,
     filteredSupplies,
@@ -185,12 +185,12 @@ export default function Supplies() {
     // Validate user is logged in
     if (!user?.id) {
       setFormError('You must be logged in to list supplies');
-      showToast('Please log in first', 'error');
+      showError('Please log in first');
       return;
     }
 
     if (!validateForm()) {
-      showToast(formError || 'Please fill in all required fields', 'error');
+      showError(formError || 'Please fill in all required fields');
       return;
     }
 
@@ -217,7 +217,7 @@ export default function Supplies() {
 
       if (result?.id) {
         setFormSuccess(true);
-        showToast(`✓ "${formData.name}" listed successfully!`, 'success');
+        showSuccess(`✓ "${formData.name}" listed successfully!`);
 
         // Reset form
         setFormData({
@@ -245,12 +245,12 @@ export default function Supplies() {
       } else {
         const errorMsg = error || 'Failed to list supply. Please try again.';
         setFormError(errorMsg);
-        showToast(errorMsg, 'error');
+        showError(errorMsg);
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'An unexpected error occurred';
       setFormError(errorMsg);
-      showToast(errorMsg, 'error');
+      showError(errorMsg);
       console.error('Supply submission error:', err);
     } finally {
       setIsSubmitting(false);
