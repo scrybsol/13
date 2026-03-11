@@ -18,6 +18,7 @@ import {
   DollarSign,
   Download,
   Upload,
+  Lock,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSupplies, Supply, CartItem } from '../hooks/useSupplies';
@@ -66,6 +67,7 @@ export default function Supplies() {
     removeFromCart,
     updateCartQuantity,
     createOrder,
+    fetchUserOrders,
     toggleFavorite,
     saveSupply,
   } = useSupplies();
@@ -113,10 +115,19 @@ export default function Supplies() {
     });
   }, [searchQuery, selectedCategory, sortBy]);
 
+  // Load user orders when orders tab is viewed
+  useEffect(() => {
+    if (activeTab === 'orders' && user?.id) {
+      fetchUserOrders().then(orders => {
+        setUserOrders(orders || []);
+      });
+    }
+  }, [activeTab, user?.id, fetchUserOrders]);
+
   const handleAddToCart = async (supply: Supply) => {
     const success = await addToCart(supply.id);
     if (success) {
-      showToast(`${supply.name} added to cart!`, 'success');
+      showSuccess(`${supply.name} added to cart!`);
     }
   };
 
@@ -484,21 +495,73 @@ export default function Supplies() {
             ) : (
               <div className="space-y-4">
                 {userOrders.map((order) => (
-                  <div key={order.id} className="bg-white rounded-lg p-6 border border-gray-200">
-                    <div className="flex justify-between items-start mb-4">
+                  <div key={order.id} className="bg-white rounded-lg shadow p-6 border border-gray-200">
+                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-4">
+                      {/* Order Number & Date */}
                       <div>
-                        <p className="font-semibold">{order.order_number}</p>
+                        <p className="text-xs text-gray-600 uppercase font-semibold mb-1">Order Number</p>
+                        <p className="font-semibold text-gray-900">{order.order_number}</p>
                         <p className="text-sm text-gray-600">{new Date(order.created_at).toLocaleDateString()}</p>
                       </div>
-                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                        order.status === 'delivered' ? 'bg-green-100 text-green-800' :
-                        order.status === 'shipped' ? 'bg-blue-100 text-blue-800' :
-                        'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                      </span>
+
+                      {/* Status */}
+                      <div>
+                        <p className="text-xs text-gray-600 uppercase font-semibold mb-1">Status</p>
+                        <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                          order.status === 'delivered' ? 'bg-green-100 text-green-800' :
+                          order.status === 'shipped' ? 'bg-blue-100 text-blue-800' :
+                          order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                        </span>
+                      </div>
+
+                      {/* Delivery Address */}
+                      <div>
+                        <p className="text-xs text-gray-600 uppercase font-semibold mb-1">Delivery To</p>
+                        <p className="font-semibold text-gray-900">{order.delivery_city}</p>
+                        <p className="text-sm text-gray-600">{order.delivery_country}</p>
+                      </div>
+
+                      {/* Amount */}
+                      <div>
+                        <p className="text-xs text-gray-600 uppercase font-semibold mb-1">Amount</p>
+                        <p className="text-lg font-bold text-blue-600">UGX {order.total_amount.toLocaleString()}</p>
+                        <p className="text-xs text-gray-600">{order.payment_status || 'pending'}</p>
+                      </div>
                     </div>
-                    <p className="text-lg font-semibold">UGX {order.total_amount.toLocaleString()}</p>
+
+                    {/* Order Items */}
+                    {order.items && order.items.length > 0 && (
+                      <div className="border-t pt-4">
+                        <p className="text-sm font-semibold text-gray-900 mb-3">Items:</p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {order.items.map((item: any) => (
+                            <div key={item.id} className="flex justify-between text-sm text-gray-700 bg-gray-50 p-2 rounded">
+                              <span>{item.supply_name} ×{item.quantity}</span>
+                              <span>UGX {item.line_total.toLocaleString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Order Details Summary */}
+                    <div className="border-t mt-4 pt-4 grid grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <p className="text-gray-600">Subtotal</p>
+                        <p className="font-semibold">UGX {(order.subtotal || 0).toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">Shipping</p>
+                        <p className="font-semibold">UGX {(order.shipping_cost || 0).toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-600">Payment Method</p>
+                        <p className="font-semibold capitalize">{(order.payment_method || 'pending').replace('_', ' ')}</p>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -708,6 +771,27 @@ export default function Supplies() {
           onAddToCart={() => handleAddToCart(selectedSupply)}
         />
       )}
+
+      {/* Checkout Modal */}
+      {showCheckout && (
+        <CheckoutModal
+          cartItems={cartItems}
+          cartTotal={cartTotal}
+          onClose={() => setShowCheckout(false)}
+          onSubmit={async (orderData) => {
+            const result = await createOrder(orderData);
+            if (result) {
+              showSuccess('Order placed successfully!');
+              setShowCheckout(false);
+              setActiveTab('orders');
+              // Refresh orders list
+              const orders = await fetchUserOrders();
+            } else {
+              showError('Failed to place order. Please try again.');
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -869,6 +953,332 @@ function CartItemRow({
         >
           Remove
         </button>
+      </div>
+    </div>
+  );
+}
+
+// Checkout Modal Component
+function CheckoutModal({
+  cartItems,
+  cartTotal,
+  onClose,
+  onSubmit,
+}: {
+  cartItems: CartItem[];
+  cartTotal: number;
+  onClose: () => void;
+  onSubmit: (orderData: any) => Promise<void>;
+}) {
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [formData, setFormData] = useState({
+    deliveryAddress: '',
+    deliveryCity: '',
+    deliveryCountry: 'Uganda',
+    deliveryPostalCode: '',
+    shippingMethod: 'standard',
+    paymentMethod: 'mobile_money',
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    setError(null);
+    setFormData(prev => ({
+      ...prev,
+      [e.target.name]: e.target.value,
+    }));
+  };
+
+  const validateForm = (): boolean => {
+    if (!formData.deliveryAddress.trim()) {
+      setError('Delivery address is required');
+      return false;
+    }
+    if (!formData.deliveryCity.trim()) {
+      setError('City is required');
+      return false;
+    }
+    if (!formData.deliveryCountry) {
+      setError('Country is required');
+      return false;
+    }
+    if (!formData.paymentMethod) {
+      setError('Payment method is required');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateForm()) return;
+
+    setIsProcessing(true);
+    try {
+      const shippingCost = formData.shippingMethod === 'express' ? 50000 : 15000;
+      await onSubmit({
+        delivery_address: formData.deliveryAddress,
+        delivery_city: formData.deliveryCity,
+        delivery_country: formData.deliveryCountry,
+        delivery_postal_code: formData.deliveryPostalCode,
+        shipping_method: formData.shippingMethod,
+        shipping_cost: shippingCost,
+        payment_method: formData.paymentMethod,
+        subtotal: cartTotal,
+        total_amount: cartTotal + shippingCost,
+        currency: 'UGX',
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to process order');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const shippingCost = formData.shippingMethod === 'express' ? 50000 : 15000;
+  const total = cartTotal + shippingCost;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-lg max-w-4xl w-full my-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 p-8">
+          {/* Left: Form */}
+          <div className="lg:col-span-2">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold">Checkout</h2>
+              <button
+                onClick={onClose}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Error Message */}
+              {error && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-red-700">{error}</p>
+                </div>
+              )}
+
+              {/* Delivery Address Section */}
+              <div>
+                <h3 className="text-lg font-semibold mb-4">Delivery Address</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Street Address *</label>
+                    <input
+                      type="text"
+                      name="deliveryAddress"
+                      value={formData.deliveryAddress}
+                      onChange={handleChange}
+                      placeholder="e.g., 123 Main Street, Building A"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">City *</label>
+                      <input
+                        type="text"
+                        name="deliveryCity"
+                        value={formData.deliveryCity}
+                        onChange={handleChange}
+                        placeholder="e.g., Kampala"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Postal Code</label>
+                      <input
+                        type="text"
+                        name="deliveryPostalCode"
+                        value={formData.deliveryPostalCode}
+                        onChange={handleChange}
+                        placeholder="Optional"
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Country *</label>
+                    <select
+                      name="deliveryCountry"
+                      value={formData.deliveryCountry}
+                      onChange={handleChange}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      required
+                    >
+                      <option value="Uganda">Uganda</option>
+                      <option value="Kenya">Kenya</option>
+                      <option value="Tanzania">Tanzania</option>
+                      <option value="Rwanda">Rwanda</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Shipping Method */}
+              <div>
+                <h3 className="text-lg font-semibold mb-4">Shipping Method</h3>
+                <div className="space-y-3">
+                  <label className="flex items-center p-4 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50" style={{borderColor: formData.shippingMethod === 'standard' ? '#2563eb' : undefined, backgroundColor: formData.shippingMethod === 'standard' ? '#eff6ff' : undefined}}>
+                    <input
+                      type="radio"
+                      name="shippingMethod"
+                      value="standard"
+                      checked={formData.shippingMethod === 'standard'}
+                      onChange={handleChange}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div className="ml-3 flex-1">
+                      <p className="font-medium text-gray-900">Standard Delivery</p>
+                      <p className="text-sm text-gray-600">5-7 business days</p>
+                    </div>
+                    <p className="font-semibold text-gray-900">UGX 15,000</p>
+                  </label>
+
+                  <label className="flex items-center p-4 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50" style={{borderColor: formData.shippingMethod === 'express' ? '#2563eb' : undefined, backgroundColor: formData.shippingMethod === 'express' ? '#eff6ff' : undefined}}>
+                    <input
+                      type="radio"
+                      name="shippingMethod"
+                      value="express"
+                      checked={formData.shippingMethod === 'express'}
+                      onChange={handleChange}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div className="ml-3 flex-1">
+                      <p className="font-medium text-gray-900">Express Delivery</p>
+                      <p className="text-sm text-gray-600">2-3 business days</p>
+                    </div>
+                    <p className="font-semibold text-gray-900">UGX 50,000</p>
+                  </label>
+                </div>
+              </div>
+
+              {/* Payment Method */}
+              <div>
+                <h3 className="text-lg font-semibold mb-4">Payment Method</h3>
+                <div className="space-y-3">
+                  <label className="flex items-center p-4 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50" style={{borderColor: formData.paymentMethod === 'mobile_money' ? '#2563eb' : undefined, backgroundColor: formData.paymentMethod === 'mobile_money' ? '#eff6ff' : undefined}}>
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="mobile_money"
+                      checked={formData.paymentMethod === 'mobile_money'}
+                      onChange={handleChange}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div className="ml-3">
+                      <p className="font-medium text-gray-900">Mobile Money (MTN, Airtel)</p>
+                      <p className="text-sm text-gray-600">Fast and secure</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center p-4 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50" style={{borderColor: formData.paymentMethod === 'card' ? '#2563eb' : undefined, backgroundColor: formData.paymentMethod === 'card' ? '#eff6ff' : undefined}}>
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="card"
+                      checked={formData.paymentMethod === 'card'}
+                      onChange={handleChange}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div className="ml-3">
+                      <p className="font-medium text-gray-900">Debit/Credit Card</p>
+                      <p className="text-sm text-gray-600">Visa, Mastercard</p>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center p-4 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50" style={{borderColor: formData.paymentMethod === 'bank' ? '#2563eb' : undefined, backgroundColor: formData.paymentMethod === 'bank' ? '#eff6ff' : undefined}}>
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="bank"
+                      checked={formData.paymentMethod === 'bank'}
+                      onChange={handleChange}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <div className="ml-3">
+                      <p className="font-medium text-gray-900">Bank Transfer</p>
+                      <p className="text-sm text-gray-600">Direct bank deposit</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={isProcessing}
+                className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 font-semibold flex items-center justify-center gap-2 transition-colors"
+              >
+                {isProcessing ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-5 h-5" />
+                    Complete Order
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+
+          {/* Right: Order Summary */}
+          <div className="lg:col-span-1">
+            <div className="bg-gray-50 rounded-lg p-6 sticky top-8">
+              <h3 className="text-lg font-semibold mb-6">Order Summary</h3>
+
+              {/* Items */}
+              <div className="space-y-3 mb-6 pb-6 border-b">
+                {cartItems.map((item) => (
+                  <div key={item.id} className="flex justify-between text-sm">
+                    <div>
+                      <p className="font-medium text-gray-900">{item.supplies?.name}</p>
+                      <p className="text-gray-600">×{item.quantity}</p>
+                    </div>
+                    <p className="font-medium text-gray-900">
+                      UGX {((item.supplies?.unit_price || 0) * item.quantity).toLocaleString()}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Totals */}
+              <div className="space-y-2 mb-6">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Subtotal</span>
+                  <span className="font-medium">UGX {cartTotal.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Shipping</span>
+                  <span className="font-medium">UGX {shippingCost.toLocaleString()}</span>
+                </div>
+                <div className="border-t pt-2 flex justify-between">
+                  <span className="font-semibold">Total</span>
+                  <span className="text-lg font-bold text-blue-600">UGX {total.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Security Info */}
+              <div className="bg-blue-50 rounded p-3 text-center">
+                <p className="text-xs text-blue-700">
+                  <Lock className="w-4 h-4 inline mr-1" />
+                  Your payment is secure and encrypted
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
